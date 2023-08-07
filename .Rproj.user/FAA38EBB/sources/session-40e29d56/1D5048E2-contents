@@ -1,0 +1,503 @@
+---
+title: 'Ecobici: Análisis de nuevos usuarios 2023'
+author: "Joaco Dominguez Lodeiro"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<br>
+
+![Imagen: Clarin](https://www.clarin.com/img/2022/06/10/RYoS5Z4C7_1256x620__1.jpg)
+
+<br>
+
+## Introducción
+### Escenario
+
+Las *"Ecobicis"* se han convertido en una opción de transporte cada vez más popular en las ciudades modernas, ofreciendo una alternativa ecológica y asequible para desplazarse por áreas urbanas. La Ciudad Autónoma de Buenos Aires ha implementado este sistema con el fin de promover la movilidad sostenible y reducir la congestión vehicular, pero para lograr una mayor eficiencia y adaptación a las necesidades de los usuarios, es fundamental comprender cómo se está utilizando este servicio y qué factores pueden influir en su utilización.
+
+En el presente caso de estudio, se explorarán los **nuevos usuarios registrados en el servicio en el primer semestre de 2023**. Se investigarán patrones de utilización de este sistema de transporte sostenible y, específicamente, se indagará en cómo estos patrones pueden variar en función de diferentes grupos demográficos, como la edad y el género de los usuarios. En orden de encontrar respuestas para las preguntas presentadas, se seguirán los seis pasos del proceso de análisis de datos: preguntar, preparar, procesar, analizar, compartir y actuar.
+
+
+### Objetivo
+
+Analizar a los nuevos usuarios registrados en el servicio de "Ecobicis" durante el primer semestre de 2023, buscando comprender los patrones de utilización de este sistema de transporte y evaluar cómo estos pueden variar según diferentes grupos demográficos, como la edad y el género de los usuarios.
+
+<br>
+
+## Preguntas
+
+Como primer paso, se plantearon las siguientes preguntas para poder realizar el análisis en pos de identificar problemáticas y presentar soluciones:
+
++ ¿Qué día de la semana tuvo mayor cantidad de nuevos usuarios?
++ ¿Qué mes tuvo mayor cantidad de nuevos usuarios?
++ ¿Cuántos nuevos usuarios hay para cada rango de edad?¿Cuál es el rango de edad con mayor cantidad de nuevos usuarios?¿Cuál fue el promedio de edad de los nuevos usuarios?
++ ¿Qué porcentaje de nuevos usuarios representa cada género?
++ ¿Qué mes fue el que más viajes registró? ¿Hay alguna relación con la cantidad de nuevos registros?
++ ¿Cuál fue el promedio de duración de viajes por día?
++ ¿Dónde están ubicadas las estaciones?
++ ¿Cuál fue la estación de inicio más elegida para el primer viaje?
++ ¿Cuál fue la estación de destino más elegida para el primer viaje?
+
+<br>
+
+## Preparación
+
+Se utilizarán dos datasets del sistema Ecobici para este estudio. Uno de ellos, **Recorridos Realizados 2023**, contiene información sobre todos los viajes del primer semestre del año, incluyendo detalles sobre las estaciones de origen y destino, así como las horas de partida y llegada. El segundo dataset, **Usuarios Ecobici 2023**, contiene información de los usuarios registrados en el servicio de Ecobici en el primer semestre del mismo año, proporcionando datos sobre la edad, género y fecha de alta de los usuarios.
+Todos los datos utilizados en el presente caso de estudio fueron descargados del portal de datos públicos [BA Data](https://data.buenosaires.gob.ar/dataset/), siendo los mismos generados, guardados y publicados por el Gobierno de la Ciudad de Buenos Aires
+
+<br>
+
+## Procesamiento de datos
+
+El trabajo será realizado con R, dado que brinda herramientas accesibles que facilitan la consulta y manejo de grandes volúmenes de datos, permitiendo además, crear visualizaciones en el mismo entorno de trabajo.
+
+
+### Instalación de paquetes y apertura de librerías.
+
+Se instalarán los siguientes paquetes para facilitar el trabajo de análisis y armado de visualizaciones:
+
++ [tidyverse](https://www.tidyverse.org/)
++ [patchwork](https://github.com/thomasp85/patchwork)
++ [sf](https://r-spatial.github.io/sf/)
+
+
+Ahora hay que abrir las librerías:
+
+```{r Apertura de librerías, echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyr)
+library(readr)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+library(patchwork)
+library(sf)
+```
+
+### Importación de datasets
+
+Importo los datasets, almacenándolos en variables para crear un data frame de cada uno, y los previsualizo para ver con los datos que se trabajarán.
+
+```{r Importación de datasets}
+raw_trips_2023 <- read.csv('datasets/trips_2023.csv')
+raw_users_2023 <- read.csv('datasets/usuarios_ecobici_2023.csv')
+
+glimpse(raw_trips_2023)
+glimpse(raw_users_2023)
+```
+
+<br>
+
+### Limpieza de data frames
+
+En primer lugar, se limpiará el data frame **raw_trips_2023**, que contiene datos sobre todos los viajes realizados en el primer semestre del 2023, almacenando los cambios en un nuevo data frame sobre el que se trabajará de ahora en adelante: **trips_2023**.
+
+En el siguiente bloque de código se realizan los siguientes cambios:
+
++ Eliminación de columnas no necesarias y de aquellas que presentan inconsistencias o falta de información.
++ Eliminación de filas que cuenten con campos en blanco.
++ Formateo de fechas para contar con consistencia en los tipos de datos y formatos.
++ Adición de columnas: una con la duración de cada viaje y otra con el día en que se realizó cada uno de ellos.
+
+```{r Limpieza raw_trips_2023}
+trips_2023 <- raw_trips_2023 %>% 
+  select(-X, -duracion_recorrido, -género) %>% 
+  drop_na() %>% 
+  mutate_at(vars(nombre_estacion_origen, nombre_estacion_destino), toupper) %>% 
+  mutate(fecha_origen_recorrido = as.POSIXct(fecha_origen_recorrido, format = "%Y-%m-%d %H:%M:%S")) %>% 
+  mutate(fecha_destino_recorrido = as.POSIXct(fecha_destino_recorrido, format = "%Y-%m-%d %H:%M:%S")) %>% 
+  mutate(minutos_viaje = floor(as.numeric(difftime(fecha_destino_recorrido, fecha_origen_recorrido, units = "mins")))) %>% 
+  mutate(dia_semana_viaje = weekdays(fecha_origen_recorrido))
+```
+
+<br>
+
+Ahora es momento de limpiar el segundo data frame, **raw_users_2023**, que almacena información de sobre los nuevos usuarios dados de alta en el primer semestre del 2023. Para ello, se llevarán adelante las siguientes modificaciones, almacenando el resultado en un nuevo data frame: **users_2023**.
+
++ Convierto la columna ID_usuarios a minúscula para que coincidan los nombre de las columnas en ambos data frames. 
++ Elimino los n/a
++ Cambio el formato de la columna fecha_alta a date
++ Filtro las edades para que solo aparezcan del rango 0 a 100 y para obtener solo valores finitos, eliminando de este modo datos irreales.
++ Elimino las columnas hora_alta y customer.has.dni ya que no son necesarias para este análisis.
+
+```{r Limpieza raw_users_2023}
+users_2023 <- raw_users_2023 %>% 
+  rename_all(tolower) %>% 
+  drop_na() %>% 
+  mutate(fecha_alta = as.Date(fecha_alta)) %>% 
+  filter(edad_usuario >= 0 & edad_usuario <= 100) %>%
+  filter(is.finite(edad_usuario)) %>% 
+  select (-hora_alta, -customer.has.dni..yes...no.) %>% 
+  mutate(dia_semana_registro = weekdays(fecha_alta))
+```
+
+<br>
+
+### Unión de data frames
+
+Para poder agilizar el análisis, se creará un data frame ancho con datos de los nuevos usuarios y los viajes que realizaron, mediante un inner join de las columnas id_usuario.
+
+Primero, y antes de realizar el join, voy a el tipo de dato de la columna "id_usuarios" alojada en el trips_2023 de chr a numeric, eliminando además las letras, para que coincidan con los valores encontrados en la otra tabla.
+
+```{r Formateo datos id_usuarios de trips_2023}
+trips_2023$id_usuario <-  as.integer(gsub("[^0-9]", "", trips_2023$id_usuario))
+```
+
+<br>
+
+Una vez listos ambos data frames, realizo el join asignándole a la nueva estructura el nombre **user_trips_2023**. Sobre este, voy a agregar una nueva columna indicando el rango de edad en el que se encuentra cada usuario.
+
+```{r Join de data frames y creación user_trips_2023}
+user_trips_2023 <- trips_2023 %>% 
+  inner_join(users_2023, by = "id_usuario") %>% 
+  rename_with(~str_replace(., "\\.x$", "")) %>% 
+  select(-ends_with(".x"), -ends_with(".y"))
+
+limites_edades <- c(15, 25, 35, 45, 55, 65, 75, 85, Inf)
+etiquetas_edades <- c("15-24", "25-34", "35-44", "45-54", "55-64", "65-74", "75-84", ">=85")
+
+user_trips_2023 <- user_trips_2023 %>%
+  mutate(rango_edad = cut(edad_usuario, breaks = limites_edades, labels = etiquetas_edades, include.lowest = TRUE))
+  
+```
+
+<br>
+
+Por último, se creará un último data frame con una fila por cada usuario nuevo registrado en el 2023.
+
+```{r Creación nuevos_usuarios_total}
+nuevos_usuarios_total <- user_trips_2023 %>% 
+  filter(!duplicated(id_usuario))
+```
+
+<br>
+
+## Análisis y visualizaciones
+
+### Cantidad de nuevos usuarios
+
+En el 2023 se dieron de alta un total de `r nrow(nuevos_usuarios_total)` usuarios. Para comenzar, se analizará cuántos nuevos usuarios hubo por cada día de la semana y cuántos por cada mes del primer semestre.
+
+<br>
+
+```{r nuevos usuarios por dia, echo=FALSE, message=FALSE, warning=FALSE}
+orden_dias_semana <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+user_trips_2023$dia_semana_registro <- factor(user_trips_2023$dia_semana_registro, levels = orden_dias_semana)
+
+# Crear el gráfico con el orden de los días de la semana especificado
+nuevos_usuarios_x_dia <- nuevos_usuarios_total %>% 
+  mutate(dia_semana_registro = factor(nuevos_usuarios_total$dia_semana_registro, levels = orden_dias_semana)) %>%   ggplot() +
+    geom_bar(mapping = aes(x = dia_semana_registro, fill = dia_semana_registro)) +
+    geom_text(aes(x = dia_semana_registro, label = after_stat(count)), 
+              stat = "count", 
+              vjust = 1.5,
+              size = 3) +
+    labs(title = "Nuevos usuarios por cada día de la semana", x = "Día de la semana", y = "Usuarios") +
+    guides(fill = FALSE) +
+    theme_minimal() +
+    scale_fill_brewer(palette = "Spectral")
+
+
+nuevos_usuarios_x_dia
+```
+
+<br>
+
+```{r Cantidad nuevos usuarios por mes, echo=FALSE, message=FALSE, warning=FALSE}
+meses_alta = month(user_trips_2023$fecha_alta, label = TRUE)
+
+nuevos_usuarios_x_mes <- ggplot(user_trips_2023) +
+  geom_bar(mapping = aes(x=meses_alta, fill=meses_alta)) +
+  geom_text(aes(x = meses_alta, label = after_stat(count)), 
+            stat = "count", 
+            vjust = 1.5,
+            size=3) +
+  labs(title = "Suma de nuevos usuarios por mes", y="Usuarios", x="Mes") +
+  guides(fill = FALSE) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Spectral")
+
+nuevos_usuarios_x_mes
+```
+
+Los sábados, domingos y lunes destacan claramente como los días con mayores registros, mientras que los demás días presentan cifras considerablemente más bajas. Respecto a los meses, se observa un descenso progresivo en la cantidad de nuevos usuarios durante el primer semestre, con un promedio de 744,2 usuarios menos cada mes.
+
+<br>
+
+### Edad de los nuevos usuarios
+
+A continuación, se analizará las edades de los nuevos usuarios, agrupándolas en rangos de diez años.  
+
+<br>
+
+```{r Edad de los nuevos usuarios, echo=FALSE, message=FALSE, warning=FALSE}
+edad_promedio <- round(mean(user_trips_2023$edad_usuario, na.rm = TRUE))
+
+nuevos_usuarios_x_edad <- ggplot(nuevos_usuarios_total) +
+  geom_histogram(mapping = aes(x=edad_usuario, fill=rango_edad), binwidth = 1, color="white", position = "identity") +
+  labs(title = "Edad nuevos usarios", x = "Edad", y = "Usuarios", fill="Rango edad") +
+  geom_vline(xintercept = edad_promedio, linetype = "dashed", color = "blue", size = .6) +
+  annotate("text", x = edad_promedio + 1, y = 2500, label = paste("Edad promedio:", round(edad_promedio)), color = "blue", hjust = 0, size=3) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Spectral")
+
+nuevos_usuarios_x_edad
+```
+
+Se revela una interesante diversidad de edades entre los nuevos usuarios, encontrando individuos de 15 a más de 85 años. Esto se observa en **promedio de edad de 31 años**.
+Por otro lado, **rango de edad de 15-24** se destaca como el más representativo en términos de cantidad de registros.
+Esta amplia variedad de perfiles denota la habilidad del servicio para atraer a una amplia gama de generaciones y perfiles, lo que fortalece la inclusión y la adopción de bicicletas públicas en la ciudad de Buenos Aires.
+
+<br>
+
+### Género de los nuevos usuarios
+
+Es importante identificar qué porcentaje de cada género representan los nuevos usuarios. Para ello, se separarán los mismos en los tres grupos registrados en el sistema: MALE (Masculino), FEMALE (Femenino) y OTHER (otros).
+
+```{r Creo data frame genre_data, echo=FALSE}
+genre_data <- nuevos_usuarios_total %>%
+  group_by(genero_usuario) %>% 
+  summarise(cantidad = n())
+
+genre_data <- genre_data %>% 
+  arrange(desc(genero_usuario)) %>%
+  # mutate(prop = cantidad / sum(cantidad) *100) %>%
+  mutate(prop = cantidad / sum(cantidad), porcentaje = scales::percent(prop, accuracy = 0.1)) %>%
+  mutate(ypos = cumsum(prop)- 0.5*prop )
+```
+
+```{r Bar plot género nuevos usuarios, echo=FALSE}
+nuevos_registros_x_genero <- ggplot(nuevos_usuarios_total) +
+  geom_bar(mapping = aes(x=genero_usuario, fill=genero_usuario)) +
+  geom_text(aes(x = genero_usuario, label = after_stat(count)), 
+            stat = "count", 
+            vjust = 1.5,
+            size=3) +
+  labs(title = "Género nuevos usuarios", x="Género", y="Cantidad") +
+  theme_minimal() +
+  guides(fill = FALSE) +
+  scale_fill_brewer(palette = "Spectral")
+```
+
+```{r Pie chart género nuevos usuarios, echo=FALSE}
+nuevos_usuarios_x_genero <- ggplot(genre_data, aes(x="", y=prop, fill=genero_usuario)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  labs(fill="Género")+
+  geom_text(aes(y = ypos, label = porcentaje), color = "black", size=3) + 
+  theme_void() +
+  scale_fill_brewer(palette = "Spectral")
+```
+
+```{r Patchwork de género, echo=FALSE}
+nuevos_registros_x_genero + nuevos_usuarios_x_genero +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5)))
+```
+
+Estos gráficos del género de los nuevos usuarios muestran una **predominancia de registros masculinos**, ligeramente superiores a los femeninos. Juntos, representan más del 90% del total de nuevos usuarios, mientras que el **10% restante corresponde a usuarios de otros géneros**. Estos hallazgos reflejan la necesidad de implementar estrategias inclusivas que promuevan la participación de un público más diverso en el servicio Ecobici, con el objetivo de asegurar una mayor equidad de género en la adopción de la bicicleta pública como opción de movilidad sostenible en la ciudad de Buenos Aires.
+
+<br>
+
+### Duración viajes nuevos usuarios
+
+Ahora, profundicemos en los viajes en sí con explorando la duración de aquellos realizados por los nuevos usuarios. Se buscará obtener el promedio de duración de los viajes diarios, intentando identificar variaciones a lo largo del primer semestre. 
+
+Para empezar, se visualizarán todos los viajes con sus respectivas duraciones, omitiendo aquellos que registraron más de 16 horas de duración. 
+
+<br>
+
+```{r duración viajes nuevos usuarios, echo=FALSE}
+promedio_duracion_viajes <- mean(user_trips_2023$minutos_viaje, na.rm = TRUE)
+
+duracion_viajes_total <- user_trips_2023 %>%
+  filter(minutos_viaje < 1000) %>% 
+  ggplot() +
+  geom_line(mapping = aes(x=fecha_origen_recorrido, y=(minutos_viaje/60)), color='blue', alpha=0.5) +
+  geom_hline(yintercept = (promedio_duracion_viajes/60), linetype = "solid", color = "red", size = .5) +
+  labs(title="Duración de los viajes", 
+       caption = "*Se omiten valores superiores a 1000 minutos", 
+       x="Fecha", 
+       y="Horas") +
+  scale_y_continuous(breaks = seq(0, 16, by = 4)) +
+  theme_minimal()
+
+duracion_viajes_total
+```
+
+<br>
+
+En el gráfico anterior, es posible apreciar que la mayoría de los viajes se encuentran dentro de la franja de las 2 horas de duración.
+
+```{r Duración viajes franja, echo=FALSE}
+### Repito el gráfico pero resalto la franja de horas con mayor frecuencia de viajes
+
+duracion_viajes_total +
+  annotate("rect", xmin = min(user_trips_2023$fecha_origen_recorrido), xmax = max(user_trips_2023$fecha_origen_recorrido),
+           ymin = 0, ymax = 2, fill = "red", alpha = 0.2)
+```
+
+<br>
+
+Por último, para tener una visión mas detallada de la franja de 2 horas, se agrandará la escala, convirtiéndola además a minutos, pudiendo identificar que la **duración promedio** de los viajes de los nuevos usuarios es de **31 minutos**.
+
+```{r Duración viajes dos franja dos horas, echo=FALSE}
+duracion_viajes_dos_horas <- user_trips_2023 %>%
+  filter(minutos_viaje < 120) %>% 
+  ggplot() +
+  geom_line(mapping = aes(x=fecha_origen_recorrido, y=minutos_viaje), color='blue', alpha=0.5) +
+  geom_hline(yintercept = promedio_duracion_viajes, linetype = "solid", color = "red", size = .5) +
+  annotate("text", 
+           x = max(user_trips_2023$fecha_origen_recorrido), 
+           y = promedio_duracion_viajes,
+           label = paste("Viaje promedio:", round(promedio_duracion_viajes), "min"), 
+           hjust = 1, 
+           vjust = -1, 
+           color = "red",
+           size=3) +
+  labs(title="Duración de los viajes", 
+       caption = "*Se omiten valores superiores a 1000 minutos", 
+       x="Fecha", 
+       y="Horas")
+
+duracion_viajes_dos_horas
+```
+
+<br>
+
+### Estaciones
+
+En este último capítulo, se analizará la ubicación geográfica de las estaciones de Ecobici en la Ciudad de Buenos Aires. Para facilitar la visualización, se utilizará un archivo georeferenciado con las comunas de la Ciudad Autónoma de Buenos Aires, disponible online en formato geojson para representar las estaciones como puntos en un mapa de la ciudad.
+
+### Ubicación estaciones Ecobici
+
+```{r archivo st de ciudad de buenos aires, message=FALSE, warning=FALSE}
+barrios <- st_read('https://bitsandbricks.github.io/data/CABA_barrios.geojson')
+```
+
+
+```{r Mapa Ubicaciones Ecobici, echo=FALSE}
+estaciones <- user_trips_2023 %>% 
+  distinct(nombre_estacion_origen, .keep_all = TRUE) %>% 
+  select(nombre_estacion_origen, long_estacion_origen, lat_estacion_origen)
+
+mapa_estaciones <- ggplot() +
+  geom_sf(data=barrios, fill="white") +
+  geom_point(data=estaciones, mapping = aes(x = long_estacion_origen, y = lat_estacion_origen), color='blue', alpha=.5) +
+  labs(title="Ubicación estaciones", x=NULL, y=NULL) +
+  guides(color = FALSE) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+mapa_estaciones
+```
+
+
+### 10 estaciones de inicio y destino más elegidas
+
+Al analizar las preferencias sobre estaciones de inicio y destino, es posible observar que en ambos casos las más elegidas por los nuevos usuarios se concentran en las zonas este y noreste de la ciudad. 
+
+```{r 10 estaciones de inicio más elegidas, echo=FALSE, message=FALSE, warning=FALSE}
+ranking_estaciones_origen <- nuevos_usuarios_total %>% 
+  group_by(nombre_estacion_origen, long_estacion_origen, lat_estacion_origen) %>% 
+  summarise(cantidad_viajes = n()) %>% 
+  arrange(-cantidad_viajes) %>% 
+  ungroup() %>% 
+  slice(1:10)
+
+barrios_ranking_origen <- cross_join(barrios, ranking_estaciones_origen)
+
+View(barrios_ranking_origen)
+
+lista_ranking_origen <- ggplot(ranking_estaciones_origen) +
+  geom_col(mapping = aes(x = reorder(nombre_estacion_origen, cantidad_viajes), y = cantidad_viajes, fill=reorder(nombre_estacion_origen, -cantidad_viajes))) +
+  geom_text(mapping = aes(x = reorder(nombre_estacion_origen, cantidad_viajes), y = cantidad_viajes, label = cantidad_viajes), 
+            vjust = 0.33, 
+            hjust=1.25, 
+            size=3) +
+  labs(x=NULL, y="viajes") +
+  coord_flip() +
+  theme_minimal() +
+  guides(fill = FALSE) +
+  scale_fill_brewer(palette="Spectral")
+
+mapa_ranking_origen <- ggplot(barrios_ranking_origen) +
+  geom_sf(fill="white") +
+  geom_point(aes(x = long_estacion_origen, 
+                 y = lat_estacion_origen, 
+                 color = reorder(nombre_estacion_origen, -cantidad_viajes), 
+                 size = cantidad_viajes),
+             alpha=0.5) +
+  scale_size_continuous(range = c(3, 15)) +
+  labs(x=NULL, y=NULL, color="Estación") +
+  theme_void() +
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1)), size=FALSE) +
+  scale_color_brewer(palette = "Spectral")  
+
+
+lista_ranking_origen
+mapa_ranking_origen
+```
+
+```{r 10 estaciones de destino más elegidas, echo=FALSE, message=FALSE, warning=FALSE}
+ranking_estaciones_destino <- nuevos_usuarios_total %>% 
+  group_by(nombre_estacion_destino, long_estacion_destino, lat_estacion_destino) %>% 
+  summarise(cantidad_viajes = n()) %>% 
+  arrange(-cantidad_viajes) %>% 
+  ungroup() %>% 
+  slice(1:10)
+
+barrios_ranking_destino <- cross_join(barrios, ranking_estaciones_destino)
+
+lista_ranking_destino <- ggplot(ranking_estaciones_destino) +
+  geom_col(mapping = aes(x = reorder(nombre_estacion_destino, cantidad_viajes), y = cantidad_viajes, fill=reorder(nombre_estacion_destino, -cantidad_viajes))) +
+  geom_text(mapping = aes(x = reorder(nombre_estacion_destino, cantidad_viajes), y = cantidad_viajes, label = cantidad_viajes), 
+            vjust = 0.33, 
+            hjust=1.25, 
+            size=3) +
+  labs(x=NULL, y="viajes") +
+  coord_flip() +
+  theme_minimal() +
+  guides(fill = FALSE) +
+  scale_fill_brewer(palette="Spectral")
+
+mapa_ranking_destino <- ggplot(barrios_ranking_destino) +
+  geom_sf(fill="white") +
+  geom_point(aes(x = long_estacion_destino, 
+                 y = lat_estacion_destino, 
+                 color = reorder(nombre_estacion_destino, -cantidad_viajes), 
+                 size = cantidad_viajes),
+             alpha=0.5) +
+  scale_size_continuous(range = c(3, 15)) +
+  labs(x=NULL, y=NULL, color="Estación") +
+  theme_void() +
+  guides(color = guide_legend(override.aes = list(size = 5, alpha=1)), size=FALSE) +
+  scale_color_brewer(palette = "Spectral")
+
+lista_ranking_destino
+mapa_ranking_destino
+```
+
+<br>
+
+## Conclusiones
+
+En el marco del análisis de nuevos usuarios del servicio de bicicletas públicas "Ecobici" en la Ciudad de Buenos Aires durante el primer semestre año 2023, se han obtenido importantes hallazgos sobre el comportamiento y características de los usuarios que se han sumado al servicio en dicho período:
+
++ **Patrones de registro de nuevos usuarios:** Se identificó que los días sábados, domingos y lunes concentraron la mayor cantidad de nuevos registros de usuarios en Ecobici, notando en paralelo una fuerte disminución en los registros conforme pasaban los meses. Estos patrones pueden tener implicaciones estratégicas para el equipo de marketing y promoción, permitiendo enfocar sus esfuerzos en aquellos momentos en los que la captación de nuevos usuarios se vio disminuida.
+
++ **Caracterización demográfica de nuevos usuarios:** Al explorar la edad y género de los nuevos usuarios, se pudo observar la diversidad en la composición demográfica del grupo. Se encontraron variaciones en la cantidad de nuevos usuarios por rango de edad, destacándose el rango de 15 a 24 años con una mayor concentración de usuarios. Además, se analizó el porcentaje de nuevos usuarios que representa cada género, identificando proporciones similares para usuarios del los géneros másculinos y femeninos, marcando ambos una notable diferencia en la cantidad de usuarios registrados dentro de otros géneros. Estos datos demográficos proporcionan información valiosa para la implementación de estrategias que fomenten la inclusión y participación equitativa en el servicio.
+
++ **Preferencias de uso de estaciones:** El análisis de las estaciones de inicio y destino más elegidas por los nuevos usuarios para su primer viaje reveló qué las zonas este y noreste de la ciudad son más atractivas para comenzar y finalizar los recorridos. Esto abre oportunidades para, por un lado, optimizar la distribución de estaciones y bicicletas, mejorando así la accesibilidad y disponibilidad del servicio para los nuevos usuarios, y por el otro, reforzar campañas de promoción en el resto de las zonas de la ciudad concon estaciones menos elegidas.
+
+En base a estos resultados, se proponen las siguientes recomendaciones para mejorar la experiencia de los nuevos usuarios, incrementar los registros y fomentar el uso continuo del servicio de Ecobici:
+
++ **Estrategias de promoción y marketing:** Se sugiere utilizar la información sobre los patrones de registro para enfocar las campañas de promoción en los días y meses con menor cantidad altas, siendo estos los más propicios para atraer nuevos usuarios. Asimismo, es importante considerar la segmentación de las campañas en función de los diferentes grupos demográficos, especialmente aquellos que representaron una menor parte de los registros en el primer semestre, lo que aumentará las posibilidades de captar la atención de los grupos de edad y género menos representados.
+
++ **Adaptación del servicio a preferencias de uso:** Considerando las estaciones de inicio y destino más elegidas por los nuevos usuarios, se sugiere reforzar campañas de promoción en el resto de las zonas de la ciudad con estaciones menos elegidas. Esto permitirá fomentar la utilización de estas estaciones menos populares y equilibrar la demanda de uso en diferentes puntos de la ciudad. Al promover estas estaciones, se busca incrementar su visibilidad y atractivo para potenciales usuarios, contribuyendo así a un uso más equitativo y eficiente del servicio "Ecobici". Además, esta información es útil para realizar ajustes en la distribución y cantidad de bicicletas disponibles en determinadas ubicaciones, lo que contribuirá a una mayor satisfacción y comodidad para los usuarios.
+
++ **Inclusión y diversidad:** Conscientes de las diferencias en la cantidad de nuevos usuarios por rango de edad y género, se recomienda implementar acciones específicas que promuevan la inclusión y diversidad en el uso del servicio, buscando equilibrar la participación de todos los grupos de la población. Para lograrlo, se pueden diseñar campañas de promoción dirigidas a segmentos específicos, destacando aquellos beneficios del servicio que puedan ser más relevantes para cada grupo demográfico. Además, es importante garantizar que la infraestructura y la accesibilidad de las estaciones sean adecuadas para todos, incluyendo medidas para personas con movilidad reducida. Al promover una mayor inclusión y diversidad en el uso del servicio "Ecobici", se fortalecerá la adhesión de nuevos usuarios, mejorando la experiencia global y la sostenibilidad del sistema de bicicletas públicas en la Ciudad de Buenos Aires.
